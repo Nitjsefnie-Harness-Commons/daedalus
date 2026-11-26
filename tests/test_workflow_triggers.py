@@ -12,8 +12,8 @@ from _wfgraph import _job_if_expression  # noqa: E402
 from _wfjobs import jobs_mapping  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
-from _yamlread import step_scalar, step_scalars  # noqa: E402
-from _yamlsteps import step_mappings, workflow_mapping  # noqa: E402
+from _yamlread import step_scalar  # noqa: E402
+from _yamlsteps import workflow_mapping  # noqa: E402
 
 
 def _assert_no_workflow_gates_one_commit_twice(workflows):
@@ -310,36 +310,21 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
         'paths': ['src/**']}, triggers['push']
 
 
-def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
+def test_gated_steps_run_only_on_their_conditions(tmp):
     """Every shipped gate holds a row here or in a sibling table; a gate
     added later needs its own row — nothing enforces that."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     measured = "${{ !cancelled() && steps.measure.conclusion == 'success' }}"
-    expected_by_step = (
-        ('Python coverage summary', measured),
-        ('Python coverage gate', measured),
-        ('JavaScript coverage summary', measured),
-        ('JavaScript coverage gate', measured),
-        ('JavaScript per-module coverage gate', measured),
-        ('Upload coverage XML', measured),
-        ('Work out the raise this run justifies',
-         "${{ !cancelled() && steps.measure.conclusion == 'success'"
-         " && github.event_name == 'push'"
+    cases = [
+        ('ratchets', 'Work out the tighten this run justifies',
+         "${{ github.event_name == 'push'"
          " && github.ref == 'refs/heads/main' }}"),
-    )
-    cases = [('coverage', step, expected)
-             for step, expected in expected_by_step]
+    ]
     cases += [
         ('actionlint', 'zizmor',
          "${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}"),
-        ('coverage-matrix', 'Upload Ubuntu coverage data',
-         "${{ !cancelled() && steps.measure.conclusion == 'success'"
-         " && matrix.os == 'ubuntu-latest' }}"),
-        ('coverage-matrix', 'Upload Python coverage data',
-         "${{ !cancelled() && steps.measure.conclusion == 'success'"
-         " && matrix.os != 'ubuntu-latest' }}"),
         ('journey-budget', 'Upload the measured counts', measured),
         ('journey-budget', 'Follow the journeys that got cheaper',
          "${{ !cancelled() && steps.check.conclusion == 'success'"
@@ -359,11 +344,11 @@ def test_the_ratchet_is_only_committed_when_it_changed(tmp):
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
-    actual = step_scalar(tests_yml, 'coverage', 'Commit the raise', 'if')
+    actual = step_scalar(tests_yml, 'ratchets', 'Commit the tighten', 'if')
     assert actual == (
         "${{ !cancelled() && steps.ratchet.outputs.changed == 'true'"
         " }}"), (
-            f'coverage/Commit the raise: {actual!r}')
+            f'ratchets/Commit the tighten: {actual!r}')
 
 
 _OUTPUT_REDIRECT = '>> "$GITHUB_OUTPUT"'
@@ -424,9 +409,8 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
             ('changes', 'Classify the changed paths', 'classify'),
             ('actionlint', 'Install zizmor', 'install_zizmor'),
             ('actionlint', 'actionlint', 'actionlint'),
-            ('coverage-matrix', 'Measure', 'measure'),
-            ('coverage', 'Combine per-OS coverage data', 'measure'),
-            ('coverage', 'Work out the raise this run justifies', 'ratchet'),
+            ('ratchets', 'Work out the tighten this run justifies',
+             'ratchet'),
             ('journey-budget', 'Measure the journeys', 'measure'),
             ('journey-budget', 'Check the journeys against the budget',
              'check'),
@@ -434,37 +418,6 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
              'tighten')):
         actual = step_scalar(tests_yml, job, step, 'id')
         assert actual == expected, f'{job}/{step}: {actual!r}'
-    comment_yml = (ROOT / '.github' / 'workflows' / 'coverage-comment.yml'
-                   ).read_text(encoding='utf-8')
-    census = ('artifact', 'missing', 'pr')
-    declared = step_scalars(comment_yml, 'comment', 'id')
-    assert declared is not None, 'job comment declares no id values'
-    assert tuple(sorted(declared)) == census
-    rows = (
-        ('Check for the comment artifact', 'artifact'),
-        ('Resolve the target pull request from the event', 'pr'),
-        ('Mark missing patch coverage', 'missing'))
-    assert tuple(sorted(row[-1] for row in rows)) == census
-    for step, expected in rows:
-        actual = step_scalar(comment_yml, 'comment', step, 'id')
-        assert actual == expected, f'comment/{step}: {actual!r}'
-    steps = step_mappings(comment_yml, 'comment')
-    assert steps is not None, 'job comment declares no steps'
-    produced = {step['id']: _run_output_names(step.get('run') or '')
-                for step in steps if step.get('id')}
-    job_condition = _job_if_expression(comment_yml, 'comment')
-    reads = ([] if job_condition is None
-             else _condition_output_reads(job_condition))
-    reads += [read for step in steps if step.get('if')
-              for read in _condition_output_reads(step['if'])]
-    unproduced = [(handle, field) for handle, field in reads
-                  if field not in produced.get(handle, ())]
-    assert not unproduced, (
-        f'conditions read outputs no declared handle writes: {unproduced} '
-        f'(produced: {sorted(produced.items())})')
-    assert _run_output_names(
-        "# echo 'phantom=1' >> \"$GITHUB_OUTPUT\"\n"
-        "echo 'present=true' >> \"$GITHUB_OUTPUT\"\n") == ['present']
 
 
 def _without_call_spacing(expression):

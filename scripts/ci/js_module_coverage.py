@@ -2,9 +2,8 @@
 """Check and tighten the per-module JavaScript coverage baseline.
 
 The mutable policy state is the ``js_coverage_baseline`` member of
-``.github/ci-thresholds.json``: how many uncovered executable lines each
-tracked JavaScript file still carries, counted from the same V8 dumps and
-the same physical code-line detection the tree-wide total uses. A recorded
+``.github/ci-thresholds.json``: how many uncovered lines each tracked
+JavaScript file still carries in test-ratchet's reports. A recorded
 number is never raised by hand and no entry is ever added by hand: cover the
 uncovered lines. A module the record does not name enters it the way the seed
 did: at its measured uncovered count, in the reviewed diff that introduces
@@ -14,22 +13,22 @@ needs no record at all. A stale entry goes away rather than being kept:
 --tighten drops one whose file is fully covered, and an entry naming a file
 that is gone is deleted by hand.
 
-  python3 scripts/ci/js_module_coverage.py "$NODE_V8_COVERAGE"
+  python3 scripts/ci/js_module_coverage.py REPORTS
   python3 scripts/ci/js_module_coverage.py --tighten \
-    "$NODE_V8_COVERAGE" --thresholds .github/ci-thresholds.json
+    REPORTS --thresholds .github/ci-thresholds.json
 """
 import argparse
 import importlib
 import os
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level,no-name-in-module
-    from . import js_coverage, thresholds, thresholds_removed
+    from . import thresholds, thresholds_removed
 else:
-    js_coverage = importlib.import_module('js_coverage')
     thresholds = importlib.import_module('thresholds')
     thresholds_removed = importlib.import_module('thresholds_removed')
 
@@ -57,11 +56,19 @@ REMEDY_FOR = {
 }
 
 
-def tracked_uncovered_counts(coverage_dir, root=ROOT):
-    """Return the uncovered executable line count of every tracked file."""
-    report = js_coverage.collect_coverage(coverage_dir, root)
-    return {rel: len(item.executable_lines) - len(item.covered_lines)
-            for rel, item in report.files.items()}
+def tracked_uncovered_counts(reports):
+    """Uncovered lines per file, any shard's report covering a line."""
+    lines, covered = {}, {}
+    for path in sorted(Path(reports).rglob('coverage-javascript.xml')):
+        for item in ET.parse(path).iter('class'):
+            rel = item.get('filename', '')
+            for line in item.iter('line'):
+                number = int(line.get('number', ''))
+                lines.setdefault(rel, set()).add(number)
+                if int(line.get('hits', '')) > 0:
+                    covered.setdefault(rel, set()).add(number)
+    return {rel: len(numbers) - len(covered.get(rel, ()))
+            for rel, numbers in lines.items()}
 
 
 def violations(counts, baseline):
@@ -93,8 +100,9 @@ def tightened(baseline, counts):
 
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('coverage_dir', type=Path,
-                        help='directory containing NODE_V8_COVERAGE dumps')
+    parser.add_argument('reports', type=Path,
+                        help="directory holding test-ratchet's "
+                             'coverage-javascript.xml reports')
     parser.add_argument('--tighten', action='store_true',
                         help='follow fully covered files down instead of '
                              'reporting')
@@ -110,7 +118,7 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         baseline = thresholds.js_coverage_baseline(data)
-        counts = tracked_uncovered_counts(args.coverage_dir, args.root)
+        counts = tracked_uncovered_counts(args.reports)
         if args.tighten:
             updated = tightened(baseline, counts)
             if updated is None:
@@ -140,8 +148,8 @@ def main(argv=None):
         for remedy in remedies:
             print(remedy, file=sys.stderr)
         return 1
-    except (OSError, subprocess.SubprocessError, ValueError) \
-            as error:
+    except (OSError, subprocess.SubprocessError, ValueError,
+            ET.ParseError) as error:
         print(str(error), file=sys.stderr)
         return 1
 

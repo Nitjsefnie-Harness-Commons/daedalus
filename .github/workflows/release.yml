@@ -186,8 +186,8 @@ jobs:
           package-manager-cache: false
 
       - name: Install the build backend and test dependencies
-        # The MCP suite skips without its extra, and test_diff_coverage needs
-        # the statement analyzer pinned by requirements-test.txt.
+        # The MCP suite skips without its extra, and the suites run under the
+        # pytest toolchain pinned by requirements-test.txt.
         run: |
           python -m pip install -r requirements-release.txt . ".[mcp]"
           python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML

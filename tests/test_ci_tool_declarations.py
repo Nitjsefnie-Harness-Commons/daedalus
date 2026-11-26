@@ -297,7 +297,6 @@ def test_pytest_over_the_tree_finds_its_suites_and_over_files_names_them(
             ('pytest tests/test_a.py .', RUNNER),
             ('py.test', RUNNER),
             ('pytest-3 -n auto', RUNNER),
-            ('python scripts/ci/coverage_suites.py', RUNNER),
             ('pytest -n auto tests/test_a.py tests/test_b.py', RUNNER),
             ('pytest tests/$SUITE.py', RUNNER),
             ('|\n          pytest tests/a.py \\\n          tests/b.py', NAMES),

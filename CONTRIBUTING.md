@@ -109,7 +109,10 @@ python3 -m pytest -n auto tests/                  # every suite
 python3 -m pytest tests/test_bridge_streams.py    # one suite
 ```
 
-CI also runs a serial `python3 -m pytest tests/` pass after the parallel one.
+CI runs the suites through
+[test-ratchet](https://github.com/Nitjsefnie-Actions/test-ratchet): its `plan`
+step splits the test files into shards, and each shard runs with `-n auto`
+and coverage measured.
 
 The suites start the real bridge as a child process and talk to it over
 loopback — there are no mocks of the HTTP layer, because every bug worth
@@ -146,7 +149,7 @@ The rest of the gate runs on GitHub:
 
 | Workflow | What it does |
 | --- | --- |
-| `tests` | The suites across 3 OSes x 2 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet per language. |
+| `tests` | The suites across 3 OSes x 2 Pythons in test-ratchet shards, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage floor per language that test-ratchet's `report` gates on the Ubuntu, Python 3.15 cell and raises on `main`. |
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings land in the Security tab, and no CodeQL check is required, so a new query cannot block an unrelated push. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
@@ -155,49 +158,31 @@ The rest of the gate runs on GitHub:
 
 Coverage is two numbers, published and gated separately, and they are
 not the same measurement. Python's is statement coverage from
-`coverage.py`; JavaScript's is physical code-line coverage derived from
-V8's own output, where a code line is a non-blank line that is not
-entirely a comment — a closing brace is a code line under that
-definition and is not a statement under the other, so the two numbers
-must never be added together or compared. Each is gated against its own
-floor because a regression in one language must not hide inside the
-other's. The JavaScript number needs no new dependency and no separate
-test run: the suites already execute the shipped extension and
-dashboard source in Node, and `NODE_V8_COVERAGE` is a Node built-in
-their child processes inherit. It also needs one piece of context.
-`tests/test_dashboard_eval.py` mounts `sections/eval.js` and
-`sections/settings.js` over `api.js`, `sse.js` and the shared
-`sections/_util.js` helper; `tests/test_dashboard_sections.py` mounts
-`sections/screenshot.js`, `sections/tabs.js` and `sections/uploads.js`
-over `api.js` and `_util.js`; the seven
-`tests/test_dashboard_section_*.py` suites each mount one of
-`sections/block-rules.js`, `cdp.js`, `cookies.js`, `css-injector.js`,
-`fetch-timings.js`, `net-capture.js` and `overview.js` over the same two
-modules, and `tests/test_dashboard_hotfixes.py` mounts
-`sections/hotfixes.js`; `tests/test_dashboard_app_shell.py` mounts
-`dashboard/app.js` itself; `tests/test_dashboard_behaviour.py`
-drives `api.js` and `_util.js` beside `extension/content.js`; and the
-extension's background, worker,
-content and page scripts run under `tests/test_extension_boundary.py`,
-`tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
-`tests/test_gm_*.py` suites. The one shipped module the JavaScript
-coverage run does not reach is the extension options page,
-`extension/options.js`, at 0 of 51 code lines — a reach the run measures
-and the tree cannot, so the leading figure is attributed to the coverage
-step summary that run prints. The code-line count beside it is the tree's,
-counted off the file by `scripts/ci/js_lines.py` and rendered in that same
-summary by `scripts/ci/js_coverage.py`'s per-file table. Nothing in the tree
-checks that figure against this paragraph, so move the file's code-line count
-and this line is simply out of date until someone reads it. The covered count and the total the number is
-measured over are
-deliberately not restated here: the first is a measurement of one run, the
-second is a function of every shipped JavaScript file in the tree, and that
-run's own coverage step summary is where both belong. The percentage the
-total would give is left out for the same reason, a denominator that wide
-going stale in the window between two pull requests that each ship
-JavaScript: a figure copied into this file is one nothing checks inside that
-window. That is the true state of the tests, not a shortfall in the
-measurement — the fix is tests, not tooling.
+`coverage.py`; JavaScript's is line coverage that test-ratchet converts
+from the V8 coverage dumps of every Node process the tests start, over the
+tracked files under `extension/` and `dashboard/`. With
+`javascript-code-only` a line whose non-blank characters all belong to
+comments is left out, with `javascript-any-character` a line counts the
+most hits of the innermost ranges holding any of its characters, and with
+`javascript-all-files` a file no test process loaded is in the report at
+0 hits — `extension/options.js`, the extension options page, is one. A
+closing brace is a measured line under that definition and is not a
+statement under the other, so the two numbers must never be added together
+or compared. Each is gated against its own floor in
+`.github/ci-thresholds.json` because a regression in one language must not
+hide inside the other's, and the floors are those of the Ubuntu, Python
+3.15 cell only. The `ratchets` job reads the same cell's JavaScript reports
+for the per-module baseline, `js_coverage_baseline`: each tracked file's
+count of uncovered lines may only fall. The suites that execute the
+shipped extension and dashboard source in Node are the reach: the
+`tests/test_dashboard_*.py` suites mount the dashboard modules, and the
+extension's background, worker, content and page scripts run under
+`tests/test_extension_boundary.py`, `tests/test_eval_relay.py` and the
+`tests/test_worker_*.py` and `tests/test_gm_*.py` suites. The covered
+count, the total and the percentage are deliberately not restated here: they
+are a measurement of one run, and that run's `report` job summary is where
+they belong. A file no suite reaches is the true state of the tests, not a
+shortfall in the measurement — the fix is tests, not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp

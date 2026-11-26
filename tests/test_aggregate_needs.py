@@ -20,11 +20,8 @@ AGGREGATE = 'aggregate'
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
 
 # What the real workflow is left with once the aggregate and its needs
-# are removed; the workflow's own comment says why.
-EXEMPT = {'diff-coverage'}
-_DOCUMENTED = ('INFORMATIONAL', 'deliberately absent')
-_EXEMPT_COMMENT = ('    # INFORMATIONAL, never a gate — which is why it is'
-                   ' deliberately absent\n')
+# are removed: every job is covered.
+EXEMPT = set()
 
 NEEDS_BLOCK = '    needs:\n      - probe\n'
 RUNNER = '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n'
@@ -88,23 +85,6 @@ def test_a_job_that_only_reaches_the_aggregate_downstream_is_named(tmp):
     assert "'outer'" in violations[0], violations
 
 
-def test_the_exemption_is_still_documented_in_the_workflow(tmp):
-    """The workflow's own comment must still carry the exemption's why."""
-    del tmp
-    assert not _undocumented(_REAL.read_text(encoding='utf-8'))
-
-
-def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
-    """Mutation of the comment away is a refusal the gate itself names."""
-    root = _copy_real(tmp)
-    source = _REAL.read_text(encoding='utf-8')
-    (root / 'tests.yml').write_text(
-        source.replace(_EXEMPT_COMMENT, '    # not a gate\n'),
-        encoding='utf-8')
-    assert _undocumented(
-        (root / 'tests.yml').read_text(encoding='utf-8')) == list(_DOCUMENTED)
-
-
 def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
     """One run names every gap, so fixing one cannot hide the other."""
     source = ('jobs:\n'
@@ -117,33 +97,6 @@ def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
     joined = '\n'.join(violations)
     assert "'absent'" in joined and 'do not exist' in joined, violations
     assert "'stray'" in joined and 'does not cover' in joined, violations
-
-
-def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
-    """Reality changed under the constant, so the equality says so."""
-    root = _copy_real(tmp)
-    source = _REAL.read_text(encoding='utf-8')
-    start = source.index('  diff-coverage:')
-    end = source.index('  journey-budget:')
-    (root / 'tests.yml').write_text(
-        source[:start] + source[end:], encoding='utf-8')
-    workflow = load(root / 'tests.yml')
-    drift = _exemption_drift(workflow)
-    assert len(drift) == 1, drift
-    assert 'diff-coverage' in drift[0], drift
-
-
-def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
-    """The why must sit on the exempt job; elsewhere in the file is not it."""
-    root = _copy_real(tmp)
-    source = _REAL.read_text(encoding='utf-8')
-    stripped = source.replace(_EXEMPT_COMMENT, '    # not a gate\n')
-    relocated = stripped.replace(
-        '  journey-budget:\n', '  journey-budget:\n' + _EXEMPT_COMMENT, 1)
-    assert source.count('  journey-budget:\n') == 1, (
-        'the relocation anchor moved')
-    (root / 'tests.yml').write_text(relocated, encoding='utf-8')
-    assert _undocumented(relocated) == list(_DOCUMENTED)
 
 
 def test_the_comparison_is_step_name_agnostic(tmp):
@@ -277,25 +230,6 @@ def _where(workflow):
     return f'{workflow.path.name}:{line}: {text!r}'
 
 
-def _comment_block(source):
-    """The comment lines that head the exempt job's own section."""
-    lines = source.splitlines()
-    start = next(index for index, line in enumerate(lines)
-                 if line.rstrip() == '  diff-coverage:')
-    end = next((index for index in range(start + 1, len(lines))
-                if lines[index].strip()
-                and not lines[index].lstrip(' ').startswith('#')
-                and len(lines[index]) - len(lines[index].lstrip(' ')) == 2),
-               len(lines))
-    return '\n'.join(lines[start:end])
-
-
-def _undocumented(source):
-    """The documented-why phrases the exempt job's comment is missing."""
-    comment = _comment_block(source)
-    return [phrase for phrase in _DOCUMENTED if phrase not in comment]
-
-
 def test_a_non_utf8_workflow_is_refused_not_raised(tmp):
     """Bytes the tree does not ship are a refusal, never a crash."""
     root = Path(tmp) / 'workflows'
@@ -305,12 +239,3 @@ def test_a_non_utf8_workflow_is_refused_not_raised(tmp):
     named = [line for line in violations if 'binary.yml' in line]
     assert len(named) == 1, violations
     assert 'UTF-8' in named[0], named
-
-
-def _copy_real(tmp):
-    """The real workflow, copied so a mutation cannot touch the tree."""
-    root = Path(tmp) / '.github' / 'workflows'
-    root.mkdir(parents=True, exist_ok=True)
-    (root / 'tests.yml').write_text(
-        _REAL.read_text(encoding='utf-8'), encoding='utf-8')
-    return root

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Contracts for the per-module JavaScript coverage ratchet."""
-import json
 import shutil
 import subprocess
 import sys
@@ -14,12 +13,18 @@ from _ratchet_fixture import (  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-import js_coverage  # noqa: E402
-from js_lines import code_lines  # noqa: E402
-
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
-WORKFLOW_SOURCE = ROOT / '.github' / 'workflows' / 'tests.yml'
 MEMBER = 'js_coverage_baseline'
+
+
+def _tracked_javascript():
+    """{path: source} of the shipped JavaScript the tests job measures."""
+    listed = subprocess.run(
+        ['git', '-C', str(ROOT), 'ls-files', '--', 'extension/*.js',
+         'dashboard/*.js'], check=True, capture_output=True, text=True,
+        env=_util.child_coverage('scrub')).stdout
+    return {rel: (ROOT / rel).read_text(encoding='utf-8')
+            for rel in listed.split()}
 
 
 def _policy():
@@ -48,7 +53,7 @@ def _main(policy, argv):
 def test_the_seed_names_only_tracked_javascript_that_still_has_code(tmp):
     del tmp
     baseline = _thresholds().js_coverage_baseline(_document())
-    sources = js_coverage.tracked_sources(ROOT)
+    sources = _tracked_javascript()
     for rel, count in baseline.items():
         assert rel in sources, rel
         assert count > 0, rel
@@ -102,15 +107,20 @@ def test_tightening_still_cannot_add_the_entry_the_remedy_names(tmp):
     assert policy.tightened({'a.js': 2}, {'a.js': 2, 'new.js': 4}) is None
 
 
-def test_the_gate_reuses_the_totals_gate_attribution(tmp):
-    """The gate must reuse the totals gate's attribution, not a second copy.
+def test_the_counts_merge_every_shard_report_of_the_cell(tmp):
+    """A line is covered when any shard covered it, as the total counts it.
 
-    With no dump at all every tracked file is wholly uncovered, so the
-    counts are exactly the totals gate's executable-line set.
+    With no report at all nothing is counted, so every record reads as
+    missing and the gate refuses rather than passing on no measurement.
     """
-    counts = _policy().tracked_uncovered_counts(Path(tmp) / 'absent')
-    assert set(counts) == set(js_coverage.tracked_sources(ROOT))
-    assert counts['dashboard/sections/tabs.js'] > 0, counts
+    policy = _policy()
+    assert policy.tracked_uncovered_counts(Path(tmp) / 'absent') == {}
+    _report(Path(tmp) / 'reports' / 'shard-1',
+            {'a.js': {1: 1, 2: 0, 3: 0}, 'b.js': {1: 0}})
+    _report(Path(tmp) / 'reports' / 'shard-2',
+            {'a.js': {1: 0, 2: 3, 3: 0}, 'c.js': {4: 2}})
+    assert policy.tracked_uncovered_counts(Path(tmp) / 'reports') == {
+        'a.js': 1, 'b.js': 1, 'c.js': 0}
 
 
 def test_violations_reports_each_kind_and_nothing_on_a_clean_pair(tmp):
@@ -144,7 +154,7 @@ def test_violations_reports_each_kind_and_nothing_on_a_clean_pair(tmp):
 def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
     """`violations()` over the repository's own JavaScript, not a fixture.
 
-    A suite run has no V8 dump, so the count each file carries here is
+    A suite run has no coverage report, so the count each file carries here is
     read back from the record: a recorded file stands at its recorded
     number, and a file with no record stands at 0, which is what a run
     that covered it completely measured. Running it over the real
@@ -153,9 +163,7 @@ def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
     with no record — the cell a fixture of four invented names never
     reaches, and the one that decides whether `unrecorded` still
     distinguishes 0 from a missing record. That is what these four
-    assertions earn here, and the `code_lines` loop below earns the rest:
-    every tracked module has an executable line, so a file nothing can
-    cover is never quietly treated as a file that needs no record.
+    assertions earn here.
 
     What they do NOT establish is anything about the record's own
     content, and the construction is why: `counts` is the record unioned
@@ -170,21 +178,19 @@ def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
     `test_the_seed_names_only_tracked_javascript_that_still_has_code`,
     and each kind's own shape is caught by the whole-dict assertion
     above. A recorded count that is merely wrong is not catchable here at
-    all; the measurement lives in the coverage job, which is the only
-    place the dumps exist.
+    all; the measurement lives in the tests job, which is the only
+    place the reports exist.
     """
     del tmp
     policy = _policy()
     baseline = _thresholds().js_coverage_baseline(_document())
-    sources = js_coverage.tracked_sources(ROOT)
+    sources = _tracked_javascript()
     counts = dict.fromkeys(sources, 0) | dict(baseline)
     found = policy.violations(counts, baseline)
     assert not found['missing'], found['missing']
     assert not found['graduated'], found['graduated']
     assert not found['unrecorded'], found['unrecorded']
     assert not found['grown'], found['grown']
-    for rel, text in sources.items():
-        assert code_lines(text, rel), rel
 
 
 def test_tightened_lowers_a_file_that_lost_cover(tmp):
@@ -290,7 +296,7 @@ def test_main_reports_a_thresholds_document_it_could_not_read(tmp):
 
 
 def _js_repo(tmp, name, sources, baseline):
-    """A tracked repository named by one hand-written V8 dump."""
+    """A tracked repository named by one hand-written coverage report."""
     thresholds = _thresholds()
     repo = Path(tmp) / name
     repo.mkdir()
@@ -298,8 +304,8 @@ def _js_repo(tmp, name, sources, baseline):
     _git(repo, 'config', 'user.email', 'tests@example.invalid')
     _git(repo, 'config', 'user.name', 'Tests')
     (repo / 'scripts' / 'ci').mkdir(parents=True)
-    for rel in ('thresholds.py', 'thresholds_removed.py', 'js_lines.py',
-                'js_coverage.py', 'js_module_coverage.py'):
+    for rel in ('thresholds.py', 'thresholds_removed.py',
+                'js_module_coverage.py'):
         shutil.copy2(ROOT / 'scripts' / 'ci' / rel,
                      repo / 'scripts' / 'ci' / rel)
     for rel, text in sources.items():
@@ -316,30 +322,19 @@ def _js_repo(tmp, name, sources, baseline):
     return repo, target
 
 
-def _dump(repo, records):
-    directory = repo / 'coverage'
-    directory.mkdir(exist_ok=True)
-    (directory / 'coverage-1.json').write_text(
-        json.dumps({'result': records}), encoding='utf-8')
-    return directory
-
-
-def _covered(text, lines):
-    """A range covering the first ``lines`` physical lines of ``text``."""
-    offsets = [0]
-    for _ in range(text.count('\n')):
-        offsets.append(text.index('\n', offsets[-1] + 1) + 1)
-    return offsets[lines]
-
-
-def _record(path, end_offset, count=1):
-    return {
-        'scriptId': '1',
-        'url': path.as_uri(),
-        'functions': [{'ranges': [{
-            'startOffset': 0, 'endOffset': end_offset, 'count': count,
-        }]}],
-    }
+def _report(directory, files):
+    """One shard's ``coverage-javascript.xml``: {path: {line: hits}}."""
+    directory.mkdir(parents=True, exist_ok=True)
+    classes = ''.join(
+        f'<class filename="{rel}"><lines>'
+        + ''.join(f'<line number="{number}" hits="{count}"/>'
+                  for number, count in sorted(hits.items()))
+        + '</lines></class>'
+        for rel, hits in files.items())
+    (directory / 'coverage-javascript.xml').write_text(
+        '<coverage><sources><source>.</source></sources><packages>'
+        f'<package><classes>{classes}</classes></package>'
+        '</packages></coverage>', encoding='utf-8')
 
 
 def _run_tighten(target, repo):
@@ -360,8 +355,7 @@ def test_cli_tighten_writes_a_lower_number_and_keeps_the_calibration(tmp):
     repo, target = _js_repo(
         tmp, 'tighten', {'extension/fixture.js': _SOURCE},
         {'extension/fixture.js': 2})
-    _dump(repo, [_record(repo / 'extension' / 'fixture.js',
-                         _covered(_SOURCE, 1))])
+    _report(repo / 'coverage', {'extension/fixture.js': {1: 1, 2: 0}})
     before = thresholds.load(target)
     result = _run_tighten(target, repo)
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -375,25 +369,10 @@ def test_cli_tighten_never_writes_a_number_above_the_record(tmp):
     repo, target = _js_repo(
         tmp, 'no-raise', {'extension/fixture.js': _SOURCE},
         {'extension/fixture.js': 1})
-    _dump(repo, [])
+    _report(repo / 'coverage', {})
     before = target.read_bytes()
     result = _run_tighten(target, repo)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == 'no file lost an uncovered line\n', result.stdout
     assert target.read_bytes() == before
     assert thresholds.load(target)[MEMBER] == {'extension/fixture.js': 1}
-
-
-def test_workflow_gates_per_module_coverage_and_tightens_it(tmp):
-    del tmp
-    workflow = WORKFLOW_SOURCE.read_text(encoding='utf-8')
-    assert ('python scripts/ci/js_module_coverage.py "$NODE_V8_COVERAGE"'
-            in workflow), workflow
-    tighten = 'python scripts/ci/js_module_coverage.py --tighten'
-    assert tighten in workflow, workflow
-    assert workflow.index(
-        'python scripts/ci/line_lengths.py --tighten') \
-        < workflow.index(tighten)
-    assert workflow.index(tighten) < workflow.index(
-        'python scripts/ci/thresholds.py --check')
-    assert '- name: JavaScript per-module coverage gate' in workflow

@@ -263,7 +263,7 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     seen = {}
-    for name in ('coverage', 'journey-budget'):
+    for name in ('ratchets', 'journey-budget'):
         job = complete_job_mapping(source, name)
         assert job is not None, f'the {name} job is not in tests.yml'
         for step in job['steps']:
@@ -282,7 +282,7 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
                 'the push script takes exactly the committed path and the '
                 f'commit message; the call does not supply both: {body}')
             seen[name] = body
-    assert sorted(seen) == ['coverage', 'journey-budget'], sorted(seen)
+    assert sorted(seen) == ['journey-budget', 'ratchets'], sorted(seen)
 
 
 def test_push_secrets_bind_only_the_main_push_environment(tmp):
@@ -294,7 +294,7 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
         assert jobs is not None, workflow
         consumers.update(((workflow, name), job) for name, job in jobs.items()
                          if _uses_secrets_context(job))
-    assert {('tests.yml', 'coverage'),
+    assert {('tests.yml', 'ratchets'), ('tests.yml', 'report'),
             ('tests.yml', 'journey-budget')} <= consumers.keys()
     for name, job in consumers.items():
         expression = job.get('environment', '')

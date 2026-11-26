@@ -111,22 +111,6 @@ def _matrix_job_running(workflow, matrix, command):
     return matches[0]
 
 
-def _python_matrix(workflow):
-    """The one literal job matrix that declares a python version."""
-    found = []
-    for name in _job_names(workflow):
-        job = complete_job_mapping(workflow, name)
-        strategy = job.get('strategy') if isinstance(job, dict) else None
-        matrix = strategy.get('matrix') if strategy else None
-        if (isinstance(matrix, dict)
-                and isinstance(matrix.get('include'), list)
-                and any(isinstance(row, dict) and 'python' in row
-                        for row in matrix['include'])):
-            found.append((name, matrix))
-    assert len(found) == 1, [name for name, _matrix in found]
-    return found[0][1]
-
-
 def _line_indent(line):
     """Return a source line's space indentation."""
     return len(line) - len(line.lstrip(' '))

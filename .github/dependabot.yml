@@ -50,6 +50,16 @@ updates:
         applies-to: security-updates
         patterns:
           - "actions/cache*"
+      # test-ratchet's plan, run and report are one release to the action,
+      # which moves the three pins together, and three dependencies to
+      # Dependabot.
+      test-ratchet:
+        patterns:
+          - "Nitjsefnie-Actions/test-ratchet*"
+      test-ratchet-security:
+        applies-to: security-updates
+        patterns:
+          - "Nitjsefnie-Actions/test-ratchet*"
 
   # The Python surface: the `mcp` extra in pyproject.toml, which is the only
   # third-party code that runs in production, and the tool pins in

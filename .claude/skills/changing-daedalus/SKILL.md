@@ -47,7 +47,8 @@ fallback). A filtered run can drop part of a failure message and make a check
 look broken when it is not.
 
 **Run one suite file at a time** - `python3 -m pytest tests/<file>.py`;
-every suite (`python3 -m pytest -n auto tests/`) is CI's run.
+every suite (`python3 -m pytest -n auto tests/`) is what CI runs, split into
+test-ratchet shards.
 
 **Run `pylint` as a single invocation over all files.** Split it and the
 cross-file duplicate check is silently skipped.
@@ -73,7 +74,7 @@ change is about.
   way. Add every scanner
   to the list whenever a change adds or edits a **string** in a tracked file -
   a different trigger from changing an import surface. A fake hostname inside a
-  new test fails all twelve legs at once while every suite that imports the
+  new test fails in every cell at once while every suite that imports the
   changed modules passes locally.
 
 ## Tests that actually pin something
@@ -238,15 +239,15 @@ Unreadable or absent history grants no exemption. Map writers only lower or
 drop existing rows; they never seed a removed entry or add a new one.
 
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
-coverage policy on the same terms.** It records how many uncovered
-executable lines each tracked JavaScript file still carries, counted from
-the same V8 dumps and the same physical code-line detection
-`python3 scripts/ci/js_coverage.py` reports the tree-wide total from; a
+coverage policy on the same terms.** It records how many uncovered lines
+each tracked JavaScript file still carries, read from the
+`coverage-javascript.xml` reports test-ratchet's run step uploads for the
+gated cell, the same lines its tree-wide JavaScript total counts; a
 recorded number is never raised by hand. The remedy for a refusal is to
 cover the uncovered lines in the named file - a total that clears its
 floor says nothing about the one module that rotted while its neighbours
 improved - and the fall is recorded with
-`python3 scripts/ci/js_module_coverage.py --tighten "$NODE_V8_COVERAGE"`,
+`python3 scripts/ci/js_module_coverage.py --tighten <reports>`,
 which also drops an entry whose file is fully covered. An entry naming a
 file that is gone is removed by hand.
 
@@ -333,9 +334,9 @@ batch only sometimes is a sample, not a gate - its agreeing with the last run
 is not evidence, and a suite that happened to be in that batch is verified no
 more than one that was not.
 
-**Read the diff-coverage comment line by line.** It names the added lines no
-test executed, and it is informational precisely so that nobody can point at a
-threshold and stop thinking. For each line named, write down why its absence of
+**Read the test-ratchet comment's uncovered added lines line by line.** They
+are the added lines no test executed, and no floor gates them, precisely so
+that nobody can point at a threshold and stop thinking. For each line named, write down why its absence of
 coverage is not a defect this change introduces - a guard a healthy run does
 not reach, a path exercised only by a suite whose fabricated tree is
 deliberately unmeasured, a file that runs as the measurement harness rather
@@ -366,8 +367,8 @@ still running, and reads as a settled head.
 collide with a branch that already has those files open.
 
 **Open the pull request as a draft as soon as you have a commit, and push as
-you go** rather than batching. CI here covers twelve legs across three
-platforms, and the draft period exists so it catches problems early; a red
+you go** rather than batching. CI here covers six cells across three
+platforms, each in shards, and the draft period exists so it catches problems early; a red
 draft head is that working, not damage.
 
 ## Watching a pull request
@@ -406,7 +407,7 @@ GitHub really does answer a throttled query with a 200 and an exit 1.
 **Exit 4 exists because "every run that happened to exist passed" is not
 "every run that should exist did".** On a head that conflicts with its base
 the merge ref cannot be built, no `pull_request` workflow is dispatched, and
-the twelve-cell `tests` matrix has no run at all, while `gate freshness` and
+the `tests` matrix has no run at all, while `gate freshness` and
 CodeQL do run and both conclude `success`: without exit 4 the tool would
 report `all 2 run(s) acceptable` and exit 0, and every seat on this fleet
 reads that exit code as its green read. The

@@ -113,13 +113,8 @@ def _enumerates_the_tests_tree(source):
     `old_tests` and every other name that contains the letters.
 
     It is an AST and not a substring because a substring match takes a
-    mention for a call: it matches a docstring, puts two non-runners in
-    the set and misses `coverage_suites`, which is the job whose
-    fetch-depth matters most. That is why the rule reads the tree.
-
-    The tracked script that enumerates the tests tree is the one that runs
-    suites, `scripts/ci/coverage_suites.py`, and its expression is what a
-    SHAPE rule reads and a name rule does not.
+    mention for a call: it matches a docstring and puts non-runners in
+    the set. That is why the rule reads the tree.
     """
     for node in ast.walk(ast.parse(source)):
         if (isinstance(node, ast.Call)
@@ -152,6 +147,11 @@ def _invoked_scripts(command, runners):
     return {name for name in runners if name in command}
 
 
+# The action that runs a shard of the suites from a `uses:` step: its
+# `run:` text is empty, so only its reference says it reaches them.
+_SUITE_ACTION = 'Nitjsefnie-Actions/test-ratchet/run@'
+
+
 def _jobs_running_suites(workflow, runners):
     """{job: {the runners it invokes}} over the workflow's own steps."""
     found = {}
@@ -163,6 +163,8 @@ def _jobs_running_suites(workflow, runners):
             run = str(step.get('run', ''))
             invoked = _invoked_scripts(run, runners) | (
                 {'pytest'} if _pytest_finds_suites(run) else set())
+            if str(step.get('uses', '')).startswith(_SUITE_ACTION):
+                invoked.add('test-ratchet/run')
             if invoked:
                 found.setdefault(job, set()).update(invoked)
     return found
@@ -208,9 +210,7 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     can see; it is not a claim about the rest.
     """
     del tmp
-    scripts = _tracked_scripts(ROOT)
-    runners = _suite_runners(scripts)
-    assert runners, 'no tracked script reaches a suite, so this guard is blind'
+    runners = _suite_runners(_tracked_scripts(ROOT))
     jobs = _jobs_running_suites(_tests_yml(), runners)
     assert jobs, (
         'no job in the workflow invokes a suite runner, so the suite set '
@@ -269,26 +269,12 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
 
 
 def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
-    """Each member of the policed set, pinned — including the ones no
-    hand-written fixture stands for.
+    """A listing of the tests directory is not a launch; a suite path is.
 
-    The members are named, so a change that drops one from the set fails
-    this test.
-
-    One thing this test does NOT show, because it is true: removing the
-    literal-launch arm leaves the set unchanged. The runner globs, so
-    the arm currently contributes NO member — it is kept for the route it
-    is meant to cover, a workflow step that runs a suite directly
-    (bullet (a)), and not for a member of today's set.
+    The literal-launch arm is kept for the route it is meant to cover, a
+    workflow step that runs a suite directly (bullet (a)).
     """
     del tmp
-    runners = _suite_runners(_tracked_scripts(ROOT))
-    runner = 'scripts/ci/coverage_suites.py'
-    assert runner in runners, (
-        f'{runner} no longer enumerates the tests tree or launches a '
-        'suite file, so the guard drops the job that runs it. The rule '
-        'is a shape now, so this is a change to what the tree does, '
-        'not a rename.')
     # The listing that is NOT a launch, and the launch that is.
     assert not _launches_a_tests_file(
         "import subprocess\n"
@@ -300,35 +286,33 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
 
 
 def test_a_job_running_pytest_over_the_tree_is_in_the_policed_set(tmp):
-    """pytest finds every suite; over named files it is bullet (a)."""
+    """pytest finds every suite, and so does test-ratchet's run step; over
+    named files it is bullet (a)."""
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
-    for run, policed in (('python -m pytest -n auto tests/', True),
-                         ('pytest -n auto', True),
-                         ('pytest --ignore tests/test_b.py', True),
-                         ('pytest tests/test_a.py -x tests/', True),
-                         ('python scripts/ci/coverage_suites.py', True),
-                         ('python -m pytest tests/test_a.py', False)):
+    for step, policed in (('run: python -m pytest -n auto tests/', True),
+                          ('run: pytest -n auto', True),
+                          ('run: pytest --ignore tests/test_b.py', True),
+                          ('run: pytest tests/test_a.py -x tests/', True),
+                          ('run: python -m pytest tests/test_a.py', False),
+                          ('uses: Nitjsefnie-Actions/test-ratchet/run@v2',
+                           True),
+                          ('uses: Nitjsefnie-Actions/test-ratchet/plan@v2',
+                           False)):
         workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'
-                    f'    steps:\n      - run: {run}\n')
+                    f'    steps:\n      - {step}\n')
         jobs = _jobs_running_suites(workflow, runners)
-        assert ('suites' in jobs) is policed, (run, jobs)
+        assert ('suites' in jobs) is policed, (step, jobs)
 
 
 def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
     """The rule reads the AST, and over-includes in the safe direction.
 
-    A substring version of this question would put two CI scripts whose
-    DOCSTRINGS name runners into the set and miss
-    `coverage_suites` — the job whose fetch-depth matters most.
+    A substring version of this question would put a CI script whose
+    DOCSTRING names runners into the set.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
-    for planner_only in ('scripts/ci/diff_coverage.py',
-                         'scripts/ci/gate_freshness.py'):
-        assert planner_only not in runners, (
-            f'{planner_only} is in the runner set and enumerates no tests '
-            'tree; the rule has grown past what it claims')
-    assert 'scripts/ci/coverage_suites.py' in runners, (
-        'coverage_suites launches the suites; a rule '
-        'that misses it misses the job whose fetch-depth matters most')
+    assert 'scripts/ci/gate_freshness.py' not in runners, (
+        'scripts/ci/gate_freshness.py is in the runner set and enumerates '
+        'no tests tree; the rule has grown past what it claims')
