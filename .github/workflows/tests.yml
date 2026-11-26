@@ -715,6 +715,83 @@ jobs:
             ~\AppData\Local\pip\Cache
           key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('requirements-*.txt') }}
 
+  # Every suite once more in one process per cell, which test-ratchet's
+  # `-n auto` run never does. Its steps are test's, for the same reasons.
+  serial:
+    needs:
+      - changes
+      - pycodestyle
+      - pylint
+      - pyright
+      - eslint
+      - actionlint
+    if: ${{ !cancelled() && !failure() }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Resolve threshold base
+        env:
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/threshold_base.py
+
+      # actions/setup-node v7.1.0
+      - uses: >-
+          actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Restore the pip cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('requirements-*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ matrix.python }}-
+
+      - name: Install the test dependencies and project
+        run: |
+          python -m pip install --upgrade pip . ".[mcp]"
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
+
+      - name: Install the lint tools the suites drive
+        run: python scripts/ci/install_lint_tools.py
+
+      - name: Run every suite serially
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m pytest tests/
+
+      - name: Save the pip cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        with:
+          path: |
+            ~/.cache/pip
+            ~/Library/Caches/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('requirements-*.txt') }}
+
   wheel:
     # Proves the published artifacts, not just the checkout: an import that
     # resolves only because the source tree is on sys.path would pass the
@@ -1184,6 +1261,7 @@ jobs:
       - actionlint
       - plan
       - test
+      - serial
       - wheel
       - report
       - ratchets

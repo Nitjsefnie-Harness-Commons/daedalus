@@ -112,7 +112,8 @@ python3 -m pytest tests/test_bridge_streams.py    # one suite
 CI runs the suites through
 [test-ratchet](https://github.com/Nitjsefnie-Actions/test-ratchet): its `plan`
 step splits the test files into shards, and each shard runs with `-n auto`
-and coverage measured.
+and coverage measured. The `serial` job also runs a serial
+`python -m pytest tests/` pass in each OS and Python cell, with no coverage.
 
 The suites start the real bridge as a child process and talk to it over
 loopback — there are no mocks of the HTTP layer, because every bug worth
@@ -149,7 +150,7 @@ The rest of the gate runs on GitHub:
 
 | Workflow | What it does |
 | --- | --- |
-| `tests` | The suites across 3 OSes x 2 Pythons in test-ratchet shards, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage floor per language that test-ratchet's `report` gates on the Ubuntu, Python 3.15 cell and raises on `main`. |
+| `tests` | The suites across 3 OSes x 2 Pythons in test-ratchet shards and once serially, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage floor per language that test-ratchet's `report` gates on the Ubuntu, Python 3.15 cell and raises on `main`. |
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings land in the Security tab, and no CodeQL check is required, so a new query cannot block an unrelated push. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
