@@ -77,7 +77,7 @@ jobs:
       workflows: ${{ steps.classify.outputs.workflows }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -100,15 +100,11 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # actions/setup-python v7.0.0
-      - uses: >-
-          actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -119,7 +115,7 @@ jobs:
       # namespace: the cache holds fetched packages, so what one job warmed
       # any of them reuses.
       - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/pip
@@ -141,7 +137,7 @@ jobs:
       # pip, so the position after the lint run decides who writes a cache,
       # never what it holds.
       - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -156,21 +152,17 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # actions/setup-python v7.0.0
-      - uses: >-
-          actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
       # Restored as in the pycodestyle job, for the same reasons.
       - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/pip
@@ -198,7 +190,7 @@ jobs:
 
       # Saved as in the pycodestyle job, for the same reasons.
       - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -228,16 +220,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      # actions/setup-python v7.0.0
-      - uses: >-
-          actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -251,7 +239,7 @@ jobs:
 
       # Restored as in the pycodestyle job, for the same reasons.
       - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/pip
@@ -279,7 +267,7 @@ jobs:
 
       # Saved as in the pycodestyle job, for the same reasons.
       - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -326,15 +314,11 @@ jobs:
       DAEDALUS_GLOBALS_VERSION: "17.12.0"
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # actions/setup-node v7.1.0
-      - uses: >-
-          actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.22.3"
           package-manager-cache: false
@@ -483,15 +467,11 @@ jobs:
         56693f8e7182360d8ecb67cbfc39cc674cde5d1b510507fff562b158bb4fc7bc
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # actions/setup-python v7.0.0
-      - uses: >-
-          actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -577,12 +557,12 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: plan
-        uses: Nitjsefnie-Actions/test-ratchet/plan@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
+        uses: Nitjsefnie-Actions/test-ratchet/plan@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
         with:
           tests: tests/**/test_*.py
           times: .github/test-times.json
@@ -612,7 +592,7 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           # A depth-1 checkout resolves neither origin/main nor a local
@@ -621,7 +601,7 @@ jobs:
           # tests/test_workflow_job_timeouts.py pins this.
           fetch-depth: 0
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
 
@@ -640,9 +620,7 @@ jobs:
       # ORDER, so this step has to stay above the first suite-running one.
       # No package-manager cache: this job has no lockfile, and a cache
       # written here is cross-run state no gate on this event reaches.
-      # actions/setup-node v7.1.0
-      - uses: >-
-          actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.22.3"
           package-manager-cache: false
@@ -653,7 +631,7 @@ jobs:
       # job has checked out and executed the code under test, so a pull-request
       # run could write what a later main run restores.
       - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/pip
@@ -685,7 +663,7 @@ jobs:
       # on, and `javascript-all-files` keeps a file no test loads in it at
       # 0 hits.
       - name: Run the shard's suites
-        uses: Nitjsefnie-Actions/test-ratchet/run@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
+        uses: Nitjsefnie-Actions/test-ratchet/run@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         with:
@@ -705,7 +683,7 @@ jobs:
       # does not change WHAT the cache holds, only who writes one: a run
       # cancelled during the suites never reaches this step.
       - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -733,12 +711,12 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
 
@@ -750,15 +728,13 @@ jobs:
           DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
-      # actions/setup-node v7.1.0
-      - uses: >-
-          actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.22.3"
           package-manager-cache: false
 
       - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/pip
@@ -782,7 +758,7 @@ jobs:
         run: python -m pytest tests/
 
       - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -810,11 +786,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -852,7 +828,7 @@ jobs:
       #
       # An artifact whose smoke test failed is the one worth having: it is the
       # copy you need to reproduce the failure, and it is rare.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
         with:
           name: artifacts-failed-smoke-test
@@ -879,12 +855,12 @@ jobs:
       actions: read
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: Nitjsefnie-Actions/test-ratchet/report@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
+      - uses: Nitjsefnie-Actions/test-ratchet/report@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
@@ -905,12 +881,12 @@ jobs:
       && github.ref == 'refs/heads/main' && 'main-push' || '' }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -922,9 +898,7 @@ jobs:
           DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
-      # actions/download-artifact v8.0.2
-      - uses: >-
-          actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: test-ratchet-ubuntu-latest-py3.15-*
           path: ${{ runner.temp }}/test-ratchet
@@ -1019,17 +993,13 @@ jobs:
       DAEDALUS_JOURNEY_ROUNDS: "1"
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # actions/setup-python v7.0.0
-      - uses: >-
-          actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.15'
+          python-version: "3.15"
 
       # The MCP journey loads the real MCP front end, and the front end's own
       # dependencies are what a bare interpreter cannot import.
@@ -1059,7 +1029,7 @@ jobs:
           echo "key=vg-debs-$(sha256sum "${RUNNER_TEMP}/vg-manifest.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the valgrind packages
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vg-debs
           key: ${{ steps.vgset.outputs.key }}
@@ -1080,7 +1050,7 @@ jobs:
 
       - name: Save the valgrind packages
         # Save before measurement can fail; failed installs must not cache fallback sets.
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ success() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
@@ -1149,7 +1119,7 @@ jobs:
       # wrong.
       - name: Upload the measured counts
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: journey-counts
           path: ${{ runner.temp }}/journey-counts.json
@@ -1224,7 +1194,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -1291,9 +1261,7 @@ jobs:
       actions: read  # the workflow-run reads
 
     steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
