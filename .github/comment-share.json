@@ -56,7 +56,7 @@
     1095
   ],
   ".github/workflows/release.yml": [
-    4854,
+    4846,
     8849
   ],
   ".github/workflows/scorecard.yml": [
@@ -460,8 +460,8 @@
     19033
   ],
   "scripts/ci/js_module_coverage.py": [
-    1138,
-    4530
+    1040,
+    4647
   ],
   "scripts/ci/line_lengths.py": [
     808,
@@ -684,8 +684,8 @@
     1901
   ],
   "tests/_lint_tool_mechanisms.py": [
-    8628,
-    12284
+    8552,
+    12208
   ],
   "tests/_lint_tool_refusals.py": [
     6880,
@@ -952,8 +952,8 @@
     2662
   ],
   "tests/test_ci_lint_tools.py": [
-    8417,
-    21023
+    8395,
+    21000
   ],
   "tests/test_ci_pip_cache.py": [
     727,
@@ -1484,7 +1484,7 @@
     14448
   ],
   "tests/test_workflow_suite_base.py": [
-    5614,
-    11227
+    5218,
+    10509
   ]
 }
