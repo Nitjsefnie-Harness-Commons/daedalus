@@ -19,8 +19,6 @@ import _mcp_ready
 # promise here, as it is for `_dashnode.DOM`.
 # pylint: disable-next=unused-import
 from _log_safe_cases import log_safe_cases  # noqa: F401
-# pylint: disable-next=unused-import
-from _teardown import OwnedTemporaryDirectory  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 # Suites start in parallel processes, so each process's first bridge start

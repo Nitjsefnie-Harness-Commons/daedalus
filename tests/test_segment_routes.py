@@ -26,9 +26,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _daedalus_env  # noqa: E402
+import _teardown  # noqa: E402
 import _util  # noqa: E402
 
-_OWNED = _util.OwnedTemporaryDirectory('segroutes_base_', refusal_warns=True)
+_OWNED = _teardown.OwnedTemporaryDirectory('segroutes_base_',
+                                           refusal_warns=True)
 atexit.register(_OWNED.cleanup)
 _BASE = _OWNED.name
 SEG_DIR = Path(_BASE) / 'segments'
