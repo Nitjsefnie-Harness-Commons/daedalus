@@ -92,12 +92,12 @@ def _audit_step(name):
 
 # One fixture per arm of audit.yml's retry block, a value ON each predicate
 # and one just PAST it, or "retries this" and "gives up on that" look alike.
-# The bare-ServiceError and 401/403/404 rows split a narrow classifier from a
-# broad one; the multi-line report is a real audit's shape. A row matching
-# both arms pins the ORDER of the two tests (retry-first runs it three times,
-# refusal-first reports at once); the 429 rows pin the 429 EXCEPTION.
-# (label, what pip-audit wrote, times the block ran it, outcome): a key of
-# AUDIT_OUTCOME_SAYS, or `C` for clean.
+# The ServiceError pair and 401/403/404 rows split a narrow classifier from a
+# broad one: a transport ServiceError retries by the 5xx line it chains, a
+# permanent one does not. A row matching both arms pins the ORDER of the two
+# tests (retry-first runs it three times, refusal-first reports at once); the
+# 429 rows pin the 429 EXCEPTION. A row is (label, what pip-audit wrote, times
+# the block ran it, a key of AUDIT_OUTCOME_SAYS or `C` for clean).
 AUDIT_OUTCOME_SAYS = {'F': 'reported findings', 'X': 'without reporting',
                       'R': '4xx', 'U': 'could not reach', 'P': 'upgrade pip'}
 AUDIT_RETRY_FIXTURES = (
@@ -109,7 +109,12 @@ AUDIT_RETRY_FIXTURES = (
      'Version: 1.0.0\nFixed-by: 1.2.3\nVulnerability ID: PYSEC-2026-1\n\n'
      'To fix all vulnerabilities, run:\npip install test/pkg==1.2.3\n',
      1, 'F'),
-    ('a bare ServiceError', 'ServiceError:\n', 3, 'U'),
+    ('a ServiceError that is no transport failure', 'pip_audit._service.'
+     "interface.ServiceError: Received malformed version from PyPI: ['x']\n",
+     1, 'X'),
+    ('a ServiceError chained to a 503', 'pip_audit._service.interface.'
+     'ServiceError\nHTTPError: 503 Server Error: Service Unavailable\n',
+     3, 'U'),
     ('requests 500', 'HTTPError: 500 Server Error: Internal Server Error\n',
      3, 'U'),
     ('requests 502', 'HTTPError: 502 Bad Gateway\n', 3, 'U'),
@@ -145,9 +150,8 @@ AUDIT_RETRY_FIXTURES = (
     ('a finding about lookups and timeouts', 'Found 1 known vulnerability in '
      'test/pkg\nFailed to resolve test/pkg: connect timeout=0\n', 1, 'F'),
     ('a requirement set pip cannot resolve', 'ERROR:pip_audit._cli:internal '
-     'pip failure: ERROR: Cannot install a==1 and a==2 because these package '
-     'versions have conflicting dependencies.\nERROR: ResolutionImpossible\n',
-     1, 'X'),
+     'pip failure: ERROR: Cannot install a==1 and a==2 because of conflicting'
+     ' dependencies.\nERROR: ResolutionImpossible\n', 1, 'X'),
     # Near miss for the finding marker: "Found" beside no vulnerability.
     ('a traceback after a count', 'Found 3 dependencies\nTraceback (most '
      'recent call last):\nKeyError: 1\n', 1, 'X'),
@@ -203,11 +207,9 @@ def audit_step_outcome(body, output, cwd, env, code=1):
               ' *--disable-pip*) ;; *) cat fixture.out;; esac;'
               ' return "$AUDIT_CODE"; }\n') + body
     result = subprocess.run(
-        [_util.workflow_bash(), '-e', '-c', script],
-        capture_output=True, text=True, timeout=_AUDIT_RETRY_TIMEOUT,
-        cwd=cwd,
-        env=_util.child_coverage(
-            'scrub', {**env, 'AUDIT_CODE': str(code)}))
+        [_util.workflow_bash(), '-e', '-c', script], capture_output=True,
+        text=True, timeout=_AUDIT_RETRY_TIMEOUT, cwd=cwd,
+        env=_util.child_coverage('scrub', {**env, 'AUDIT_CODE': str(code)}))
     calls = (root / 'runs.log').read_text(encoding='utf-8').splitlines()
     runs = [call for call in calls if '--disable-pip' not in call]
     waits = (root / 'sleeps.log').read_text(encoding='utf-8').split()
@@ -321,11 +323,9 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
             if runs > 1:
                 shown = outcome['out'].count
                 tail_lines = output.strip().splitlines()
-                assert all(shown(line) >= runs
-                           for line in tail_lines[-5:]), (
+                assert all(shown(line) >= runs for line in tail_lines[-5:]), (
                     f'{label}: each attempt shows the output tail: {outcome}')
-                assert all(shown(line) <= 1
-                           for line in tail_lines[:-5]), (
+                assert all(shown(line) <= 1 for line in tail_lines[:-5]), (
                     f'{label}: the excerpt is bounded: {outcome}')
             waits = outcome['sleeps']
             assert len(waits) >= runs - 1, (
