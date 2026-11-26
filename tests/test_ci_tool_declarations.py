@@ -41,9 +41,9 @@ from _lint_tool_mechanisms import (  # noqa: E402
     _mechanism_residue, _mechanism_share, _mechanism_shares)
 from _lint_tool_roles import _PREAMBLE, _derive_tool_roles  # noqa: E402
 from _suite_jobs import (  # noqa: E402
-    SCRIPT_PATH, _actions_before, _declarations_before, _INERT_SHAPES,
-    _PATH_EXTENSIONS, _SCRIPT_SHAPES, _executable_shape, _runner_doors,
-    _suite_step, _unclassifiable_steps)
+    NAMES, RUNNER, SCRIPT_PATH, _actions_before, _declarations_before,
+    _INERT_SHAPES, _PATH_EXTENSIONS, _SCRIPT_SHAPES, _executable_shape,
+    _runner_doors, _suite_step, _unclassifiable_steps)
 
 ROOT = _util.ROOT
 
@@ -278,6 +278,26 @@ def test_no_job_reaches_the_suites_through_a_file_the_walk_cannot_read(tmp):
         'is a tracked file the walk never resolves: the universe is '
         f'_PATH_EXTENSIONS ({", ".join(_PATH_EXTENSIONS)}), and a wrapper '
         'in any other language names nothing this walk can see.')
+
+
+def test_pytest_over_the_tree_finds_its_suites_and_over_files_names_them(
+        tmp):
+    """A suite added tomorrow reaches pytest unless the step lists files."""
+    del tmp
+    for run, expected in (
+            ('python -m pytest -n auto tests/', RUNNER),
+            ('pytest', RUNNER),
+            ('python -m pytest tests/ tests/test_a.py', RUNNER),
+            ('pytest -n auto && ls tests/test_a.py', RUNNER),
+            ('python run_tests.py', RUNNER),
+            ('pytest -n auto tests/test_a.py tests/test_b.py', NAMES),
+            ('coverage run --parallel-mode -m pytest tests/test_a.py', NAMES),
+            ('pip install pytest-xdist pytest==9 && cat pytest.ini', None)):
+        workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'
+                    '    steps:\n      - uses: actions/checkout@v4\n'
+                    f'      - run: {run}\n')
+        reach = _suite_step(workflow, 'suites')
+        assert (reach[1] if reach else None) == expected, (run, reach)
 
 
 def test_every_extension_the_walk_resolves_is_classified_exactly_once(tmp):

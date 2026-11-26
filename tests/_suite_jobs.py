@@ -42,9 +42,9 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 ROOT = _util.ROOT
 WORKFLOW_DIR = ROOT / '.github' / 'workflows'
-# A job whose suites it FINDS: a tracked module that enumerates the suite
-# tree and launches what it enumerates. A suite added tomorrow walks
-# through such a job, so it has to install what the suites skip on.
+# A job whose suites it FINDS: pytest, or a tracked module enumerating
+# the suite tree and launching what it finds. A suite added tomorrow
+# walks through such a job, so it has to install what the suites skip on.
 RUNNER = 'runner'
 # A job whose suites it NAMES: the step carries the paths. A suite added
 # tomorrow cannot reach it, so the only obligation is keeping the list.
@@ -56,6 +56,8 @@ NAMES = 'names'
 # the middle of an English sentence is not a path, so the reference has to
 # reach the end of the line or a closing quote.
 SUITE_TREE = re.compile(r"""(?<![\w/.-])tests(?:/|[\s'")\\]*(?:#.*)?$)""")
+# A pytest launch, then the rest of its shell command.
+PYTEST = re.compile(r'pytest(?![\w.=-])([^;&|)\n]*)')
 # A tracked file a step's own text names, by an extension worth reading.
 # The list is the whole universe this walk can resolve, and it is one
 # tuple rather than a set spelled into the pattern: a step naming a
@@ -105,6 +107,21 @@ def _step_inputs(step):
 def _names_suite_tree(text):
     """Whether the text names a path under `tests/`."""
     return any(SUITE_TREE.search(line) for line in text.splitlines())
+
+
+def _pytest_finds_suites(text):
+    """Whether a pytest launch in the text collects rather than lists.
+
+    pytest discovers the tree itself (`testpaths` when no path is given),
+    so a suite added tomorrow reaches it unless every tree path it is
+    handed is a suite file.
+    """
+    for match in PYTEST.finditer(text):
+        tree = [arg for arg in match.group(1).split()
+                if arg.startswith('tests/')]
+        if not tree or not all(arg.endswith('.py') for arg in tree):
+            return True
+    return False
 
 
 def _tracked(token):
@@ -195,12 +212,13 @@ def _mentions_suite_tree(node):
 def _suite_step(workflow, job):
     """`(index, mechanism)` for the first step reaching the suites, or None.
 
-    A step's resolved inputs are its `run:`, its `uses:` and its `with:`
-    values, and the step reaches the suite tree when they name a path under
-    it, or name a tracked module that discovers the tree and launches what
-    it finds. Reading a step's own text is not enough — a job whose only
-    step is `python scripts/ci/third_runner.py` says nothing about suites —
-    so the file a step runs is read for what it does.
+    A step's resolved inputs are its `run:`, `uses:` and `with:` values,
+    and the step reaches the suite tree when they launch pytest, name a
+    path under it, or name a tracked module that discovers the tree and
+    launches what it finds. Reading a step's own text is not enough — a
+    job whose only step is `python scripts/ci/third_runner.py` says
+    nothing about suites — so the file a step runs is read for what it
+    does.
 
     The INDEX is half the answer, because where a step sits in a job decides
     what its siblings could count on: a `setup-node` step after
@@ -218,6 +236,8 @@ def _suite_step(workflow, job):
     """
     for index, step in enumerate(_job_steps(workflow, job)):
         inputs = _step_inputs(step)
+        if _pytest_finds_suites(inputs):
+            return index, RUNNER
         if _names_suite_tree(inputs):
             return index, NAMES
         if any(_runs_suites(path) for path in _named_files(inputs)):
