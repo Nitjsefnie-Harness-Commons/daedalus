@@ -290,9 +290,8 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     caller that caught the failure and carried on would hold a pipe to a
     process that does not exist, one the watcher never gives back.
 
-    Both ends are read from the one pair `spawn_watched` opens, recorded
-    at the module's own `os` (`subprocess`'s pipes are not), so a
-    descriptor the process already holds is never read as its leak."""
+    The pair is recorded at the module's own `os`, so a descriptor already
+    held, or one `subprocess` opens, is never read as the module's leak."""
     client = _client()
     _probe_agrees_with_the_pipe()
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
