@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -199,20 +200,20 @@ def _cleanup_spawn(proc, write_fd):
 
 @contextlib.contextmanager
 def _record_watch_pipe():
-    real_pipe = os.pipe
     captured = []
 
     def recording_pipe():
-        ends = real_pipe()
-        if not captured:
-            captured.extend(ends)
+        ends = os.pipe()
+        captured.extend(ends)
         return ends
 
-    os.pipe = recording_pipe
+    real_os = _PARENT_WATCH.os
+    stand_in = {**vars(os), 'pipe': recording_pipe}
+    setattr(_PARENT_WATCH, 'os', types.SimpleNamespace(**stand_in))
     try:
         yield captured
     finally:
-        os.pipe = real_pipe
+        setattr(_PARENT_WATCH, 'os', real_os)
         for descriptor in captured:
             if _fd_open(descriptor):
                 os.close(descriptor)
