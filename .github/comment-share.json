@@ -1180,8 +1180,8 @@
     16083
   ],
   "tests/test_gh_client_lifetime.py": [
-    6873,
-    18737
+    6633,
+    18515
   ],
   "tests/test_gh_rate_limit.py": [
     10108,
