@@ -170,15 +170,6 @@ def _still_open(descriptor):
     return True
 
 
-def _sentinel():
-    """A descriptor, and the two the next `os.pipe` will hand out: it
-    allocates the two lowest free descriptors on POSIX and the Windows
-    CRT both, so a descriptor held open just before the call names the
-    pair exactly, without knowing the numbers."""
-    held = os.open(os.devnull, os.O_RDONLY)
-    return held, held + 1, held + 2
-
-
 def _probe_agrees_with_the_pipe():
     """Whether the check above can tell a closed descriptor from an open one:
     without it, a row asserting `not _still_open(n)` passes just as happily
@@ -298,25 +289,33 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     caller that caught the failure and carried on would hold a pipe to a
     process that does not exist, one the watcher never gives back.
 
-    Both ends are read back by number, from a descriptor held open
-    across the call so the numbers are known; a row that checked only
-    the write end would pass a module that gave neither back."""
+    Both ends are the pair `spawn_watched` itself opened, recorded as the
+    real `os.pipe` hands it out, so a descriptor the process already
+    holds is never read as the module's; a row that checked only the
+    write end would pass a module that gave neither back."""
     client = _client()
     _probe_agrees_with_the_pipe()
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
-    sentinel, read_fd, write_fd = _sentinel()
+    real_pipe, opened = os.pipe, []
+
+    def recording_pipe():
+        opened.append(real_pipe())
+        return opened[-1]
+
+    os.pipe = recording_pipe
     try:
-        try:
-            client.spawn_watched([absent])
-        except OSError as exc:
-            assert exc.errno == errno.ENOENT, exc
-        else:
-            raise AssertionError('a spawn of nothing returned a child')
-        assert not _still_open(read_fd), 'the failed spawn kept its read end'
-        assert not _still_open(write_fd), (
-            'the failed spawn kept its write end')
+        client.spawn_watched([absent])
+    except OSError as exc:
+        assert exc.errno == errno.ENOENT, exc
+    else:
+        raise AssertionError('a spawn of nothing returned a child')
     finally:
-        os.close(sentinel)
+        os.pipe = real_pipe
+    assert opened, 'spawn_watched opened no pipe'
+    # Its own pair is the first; `Popen`'s error pipe, if any, follows.
+    read_fd, write_fd = opened[0]
+    assert not _still_open(read_fd), 'the failed spawn kept its read end'
+    assert not _still_open(write_fd), 'the failed spawn kept its write end'
 
 
 def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
