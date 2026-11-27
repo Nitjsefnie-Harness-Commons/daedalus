@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -289,20 +290,20 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     caller that caught the failure and carried on would hold a pipe to a
     process that does not exist, one the watcher never gives back.
 
-    Both ends are the pair `spawn_watched` itself opened, recorded as the
-    real `os.pipe` hands it out, so a descriptor the process already
-    holds is never read as the module's; a row that checked only the
-    write end would pass a module that gave neither back."""
+    Both ends are read from the one pair `spawn_watched` opens, recorded
+    at the module's own `os` (`subprocess`'s pipes are not), so a
+    descriptor the process already holds is never read as its leak."""
     client = _client()
     _probe_agrees_with_the_pipe()
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
-    real_pipe, opened = os.pipe, []
+    opened = []
 
     def recording_pipe():
-        opened.append(real_pipe())
+        opened.append(os.pipe())
         return opened[-1]
 
-    os.pipe = recording_pipe
+    stand_in = {**vars(os), 'pipe': recording_pipe}
+    setattr(client, 'os', types.SimpleNamespace(**stand_in))
     try:
         client.spawn_watched([absent])
     except OSError as exc:
@@ -310,9 +311,8 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     else:
         raise AssertionError('a spawn of nothing returned a child')
     finally:
-        os.pipe = real_pipe
-    assert opened, 'spawn_watched opened no pipe'
-    # Its own pair is the first; `Popen`'s error pipe, if any, follows.
+        setattr(client, 'os', os)
+    assert len(opened) == 1, f'{len(opened)} pipes opened, not one'
     read_fd, write_fd = opened[0]
     assert not _still_open(read_fd), 'the failed spawn kept its read end'
     assert not _still_open(write_fd), 'the failed spawn kept its write end'
