@@ -443,7 +443,6 @@ def test_the_aggregate_job_runs_the_module(tmp):
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     assert job.get('if') == '${{ always() }}', job.get('if')
     assert 'if' not in _gate_step()
-    assert len([s for s in job['steps'] if 'uses' in s]) == 1, job['steps']
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
     assert gate['env'] == {

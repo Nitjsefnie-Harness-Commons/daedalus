@@ -22,6 +22,7 @@ _REVIEWED_NONCACHE_ACTIONS = frozenset((
     'actions/checkout',
     'actions/upload-artifact',
     'actions/download-artifact',
+    'nitjsefnie-actions/freshness',
     'nitjsefnie-actions/size-ratchet',
     'nitjsefnie-actions/test-ratchet/plan',
     'nitjsefnie-actions/test-ratchet/run',

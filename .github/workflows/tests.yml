@@ -1239,18 +1239,17 @@ jobs:
       - size-baseline
       - thresholds
     runs-on: ubuntu-latest
-    # Two numbers, and the gap between them is the reason for both. The
-    # poll bound (DAEDALUS_SECRETS_POLL_BOUND_S below) IS the gitleaks job's
-    # own 10-minute backstop: no queueing is left in it, so a scan unreported
-    # by then is refused rather than waited on.
+    # Two numbers, and the gap between them is the reason for both. The poll
+    # bound (DAEDALUS_SECRETS_POLL_BOUND_S below) IS the gitleaks job's own
+    # 10-minute backstop: no queueing is left in it, so a scan unreported by
+    # then is refused rather than waited on.
     #
-    # A superseded cancellation makes two reads before the scan wait,
-    # without reading its own jobs. The deadline-straddling poll and the
-    # scan's jobs read add two read ceilings after the wait. Ten minutes
-    # plus four two-minute read ceilings reserves 18 of these 20;
-    # poll-sleep overshoot and reporting use the remaining allowance.
-    # A non-superseded cancellation makes three reads and returns red,
-    # without polling for the secrets scan.
+    # A superseded cancellation makes two reads before the scan wait, without
+    # reading its own jobs. The deadline-straddling poll and the scan's jobs
+    # read add two read ceilings after the wait. Ten minutes plus four
+    # two-minute read ceilings reserves 18 of these 20; poll-sleep overshoot,
+    # reporting and the freshness step use the rest. A non-superseded
+    # cancellation makes three reads and returns red, without the scan poll.
     timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
@@ -1301,21 +1300,20 @@ jobs:
 
       # scripts/ci/aggregate_gate.py owns the verdict, including the
       # superseded-cancel rule: a cancelled dependency whose run a strictly
-      # newer run of this workflow replaced gates nothing, while a
-      # deliberate cancel stays a failure.
+      # newer run of this workflow replaced gates nothing, while a deliberate
+      # cancel stays a failure.
       #
       # It also requires the `secrets` workflow's gitleaks job on this head
       # SHA. That job is in no `needs:` set and no required context of this
-      # repository, so `needs:` cannot reach it and a pull request whose
-      # scan is red would otherwise merge green.
+      # repository, so `needs:` cannot reach it and a pull request whose scan
+      # is red would otherwise merge green.
       #
-      # No event skips it, workflow_dispatch included: a dispatch publishes
-      # its check run on the SHA it ran against, and GitHub reads required
-      # contexts off the check runs on the pull request head whatever event
-      # produced them — a skip here would be a bypass. The cost is that a
-      # manual run at a SHA with no `secrets` run goes red once the bound
-      # expires, which is what
-      # `gh workflow run secrets.yml --ref <branch>` is for.
+      # No event skips it, workflow_dispatch included: a dispatch publishes its
+      # check run on the SHA it ran against, and GitHub reads required contexts
+      # off the check runs on the pull request head whatever event produced
+      # them — a skip here would be a bypass. The cost is that a manual run at
+      # a SHA with no `secrets` run goes red once the bound expires, which is
+      # what `gh workflow run secrets.yml --ref <branch>` is for.
       - name: Check dependency results
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1328,3 +1326,5 @@ jobs:
             ${{ github.event.pull_request.head.sha || github.sha }}
           DAEDALUS_SECRETS_POLL_BOUND_S: '600'
         run: python3 scripts/ci/aggregate_gate.py
+      - if: github.event_name == 'pull_request' || github.ref_name == github.event.repository.default_branch
+        uses: Nitjsefnie-Actions/freshness@5edc2a45ff894cf49c5cc8d293bbae0af33507d4 # v1.0.0
