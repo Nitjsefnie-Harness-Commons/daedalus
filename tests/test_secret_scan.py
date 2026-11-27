@@ -130,7 +130,7 @@ def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
     ignore = argv[argv.index('--gitleaks-ignore-path') + 1]
     assert ignore.startswith('$RUNNER_TEMP/'), argv
     assert argv[argv.index('--config') + 1] == ignore + '/.gitleaks.toml'
-    walk = '--full-history --diff-filter=uxdb --diff-merges=remerge HEAD'
+    walk = '--full-history --diff-filter=uxdb --diff-merges=first-parent HEAD'
     assert f'--log-opts={walk}' in argv, argv  # ONE argument, by quoting
 
 
