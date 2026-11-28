@@ -291,8 +291,9 @@ shape only.
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate runs when the pull
 request is opened, edited, reopened, pushed to, or marked ready for review. It
-skips drafts and bot-authored pull requests; a skipped job reports success, so
-neither blocks a merge, and a draft is checked when marked ready. It checks
+skips bot-authored pull requests (a skipped job reports success, so it does not
+block a merge), and the action leaves a draft unjudged until it is marked
+ready for review, when it is checked. It checks
 the body against the template, that a claimed issue is assigned to you, that
 every non-merge commit subject follows Conventional Commits, and that each
 commit is attributed to you; [the action's README](https://github.com/Nitjsefnie-Actions/pr-gate#readme)
